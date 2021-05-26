@@ -12,6 +12,7 @@
 #include <ros/ros.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <mavros_msgs/CommandBool.h>
+#include <mavros_msgs/CommandTOL.h>
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
 #include <cstdio>
@@ -74,6 +75,8 @@ int main(int argc, char **argv)
                                    ("mavros/setpoint_position/local", 10);
     ros::ServiceClient arming_client = nh.serviceClient<mavros_msgs::CommandBool>
                                        ("mavros/cmd/arming");
+    ros::ServiceClient land_client = nh.serviceClient<mavros_msgs::CommandTOL> 
+                                       ("mavros/cmd/land");
     ros::ServiceClient set_mode_client = nh.serviceClient<mavros_msgs::SetMode>
                                          ("mavros/set_mode");
 
@@ -89,7 +92,7 @@ int main(int argc, char **argv)
     geometry_msgs::PoseStamped pose;
     pose.pose.position.x = 0;
     pose.pose.position.y = 0;
-    pose.pose.position.z = 2;
+    pose.pose.position.z = 1.5;
 
     mavros_msgs::SetMode offb_set_mode;
     offb_set_mode.request.custom_mode = "OFFBOARD";
@@ -97,7 +100,15 @@ int main(int argc, char **argv)
     mavros_msgs::CommandBool arm_cmd;
     arm_cmd.request.value = true;
 
+    mavros_msgs::CommandTOL land_cmd;
+    land_cmd.request.yaw = 0;
+    land_cmd.request.latitude = 0;
+    land_cmd.request.longitude = 0;
+    land_cmd.request.altitude = 0;
+
     ros::Time last_request(0);
+
+    bool try_to_land = false;
 
     while (ros::ok()) {
         if (current_state.mode != "OFFBOARD" &&
@@ -120,19 +131,24 @@ int main(int argc, char **argv)
         }
 
         int c = getch();
+        ROS_INFO("Key Pressed: %d", c);
         if (c != EOF) {
             switch (c) {
             case 65:    // key up
-                pose.pose.position.z += 1;
+                pose.pose.position.z += 0.1;
                 break;
             case 66:    // key down
-                pose.pose.position.z += -1;
+                pose.pose.position.z += -0.1;
                 break;
             case 67:    // key right
-                pose.pose.position.y += 1;
+                pose.pose.position.y += 0.1;
                 break;
             case 68:    // key left
-                pose.pose.position.y -= 1;
+                pose.pose.position.y -= 0.1;
+                break;
+            case 'l':    // key l
+                try_to_land = true;
+                ROS_INFO("tring to land");
                 break;
             case 63:
                 return 0;
@@ -142,9 +158,26 @@ int main(int argc, char **argv)
 
         ROS_INFO("setpoint: %.1f, %.1f, %.1f", pose.pose.position.x, pose.pose.position.y, pose.pose.position.z);
 
+        if (try_to_land)
+        {
+            ROS_INFO("tring to land break while");
+            break;
+        }
+        else
+        {
+            local_pos_pub.publish(pose);
+        }
 
-        local_pos_pub.publish(pose);
+        ros::spinOnce();
+        rate.sleep();
+    }
 
+    // Land the drone when exit
+    ROS_INFO("tring to land");
+    while (!(land_client.call(land_cmd) &&
+            land_cmd.response.success)){
+        //local_pos_pub.publish(pose);
+        ROS_INFO("tring to land");
         ros::spinOnce();
         rate.sleep();
     }
